@@ -32,6 +32,9 @@ fn main() -> ExitCode {
                 PathValidationError::NotADirectory { path } => {
                     eprintln!("  Not a directory: {}", path.display())
                 }
+                PathValidationError::ShouldNotTargetRoot { path } => {
+                    eprintln!("  Should not target root directory: {}", path.display())
+                }
             }
         }
         return ExitCode::FAILURE;
@@ -48,6 +51,7 @@ fn main() -> ExitCode {
 enum PathValidationError {
     Io { path: String, io_error: io::Error },
     NotADirectory { path: PathBuf },
+    ShouldNotTargetRoot { path: PathBuf },
 }
 
 fn path_validate(raw_path: &str) -> Result<PathBuf, PathValidationError> {
@@ -58,6 +62,9 @@ fn path_validate(raw_path: &str) -> Result<PathBuf, PathValidationError> {
 
     if !path.is_dir() {
         return Err(PathValidationError::NotADirectory { path });
+    }
+    if path.parent().is_none() {
+        return Err(PathValidationError::ShouldNotTargetRoot { path });
     }
 
     Ok(path)
