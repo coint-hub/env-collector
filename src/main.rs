@@ -1,11 +1,11 @@
 use chrono::Local;
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::{fs, io};
 
 use clap::Parser;
-use log::{debug, error, trace};
+use log::{debug, error, trace, warn};
 
 #[derive(Parser)]
 #[command(version, about)]
@@ -13,8 +13,9 @@ struct Cli {
     #[arg(required = true)]
     paths: Vec<String>,
 
+    // Warnings are shown by default so skipped symlinks do not go unnoticed.
     #[command(flatten)]
-    verbosity: clap_verbosity_flag::Verbosity,
+    verbosity: clap_verbosity_flag::Verbosity<clap_verbosity_flag::WarnLevel>,
 }
 
 fn main() -> ExitCode {
@@ -140,12 +141,21 @@ fn env_find_files(dir: PathBuf) -> Result<Vec<PathBuf>, EnvFindFilesError> {
     for entry in read_dir {
         let entry = entry.map_err(|io_error| EnvFindFilesError::from_io(&dir, io_error))?;
         let path = entry.path();
-        if path.is_file() && env_is_env_file(&path) {
+        // `DirEntry::file_type` does not follow symlinks, unlike `Path::is_file`
+        // and `Path::is_dir`.
+        let file_type = entry
+            .file_type()
+            .map_err(|io_error| EnvFindFilesError::from_io(&path, io_error))?;
+        if file_type.is_symlink() {
+            warn!("Skipping symlink (not followed): {}", path.display());
+            continue;
+        }
+        if file_type.is_file() && env_is_env_file(&path) {
             trace!("Found env file: {}", path.display());
             files.push(path);
             continue;
         }
-        if path.is_dir() && !env_is_dir_ignored(&path) {
+        if file_type.is_dir() && !env_is_dir_ignored(&path) {
             files.extend(env_find_files(path)?);
         }
     }
@@ -242,7 +252,7 @@ fn env_build_tar(root_path: &Path, files: &[PathBuf]) -> Result<PathBuf, EnvBuil
     })?;
     let tar_name = format!("{}_{}.tar.zstd", root_name, at);
     let tar_path = PathBuf::from(tar_name);
-    let tar_file = File::create_new(&tar_path).map_err(|err| EnvBuildError {
+    let tar_file = env_create_tar_file(&tar_path).map_err(|err| EnvBuildError {
         path: tar_path.to_path_buf(),
         message: format!(
             "Failed to create tar file '{}': {}",
@@ -297,4 +307,22 @@ fn env_build_tar(root_path: &Path, files: &[PathBuf]) -> Result<PathBuf, EnvBuil
     })?;
 
     Ok(tar_path)
+}
+
+/// Creates the archive file, refusing to overwrite an existing one.
+///
+/// The archive holds secrets and is never modified after it is written, so on
+/// Unix it is created read-only for its owner (mode 400). The mode is set at
+/// creation, so the file is never readable by anyone else, not even briefly.
+/// Windows has no equivalent mode bits; the file keeps its default permissions
+/// there.
+fn env_create_tar_file(tar_path: &Path) -> io::Result<File> {
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o400);
+    }
+    options.open(tar_path)
 }
