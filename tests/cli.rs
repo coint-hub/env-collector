@@ -118,3 +118,19 @@ fn archive_is_read_only_for_its_owner() {
         .mode();
     assert_eq!(mode & 0o777, 0o400, "mode was {:o}", mode & 0o777);
 }
+
+#[test]
+fn archive_uses_the_conventional_tar_zst_extension() {
+    let workspace = Workspace::new("archive_uses_the_conventional_tar_zst_extension");
+    fs::write(workspace.project().join(".env"), "A=1\n").unwrap();
+
+    let output = workspace.collect();
+
+    assert!(output.status.success());
+    let archive = workspace.archive();
+    let name = archive.file_name().unwrap().to_str().unwrap();
+    assert!(
+        name.starts_with("proj_") && name.ends_with(".tar.zst"),
+        "unexpected archive name: {name}"
+    );
+}

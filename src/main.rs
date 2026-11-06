@@ -250,7 +250,7 @@ fn env_build_tar(root_path: &Path, files: &[PathBuf]) -> Result<PathBuf, EnvBuil
         path: root_path.to_path_buf(),
         message: format!("Root path has no parent directory: {}", root_path.display()),
     })?;
-    let tar_name = format!("{}_{}.tar.zstd", root_name, at);
+    let tar_name = format!("{}_{}.tar.zst", root_name, at);
     let tar_path = PathBuf::from(tar_name);
     let tar_file = env_create_tar_file(&tar_path).map_err(|err| EnvBuildError {
         path: tar_path.to_path_buf(),

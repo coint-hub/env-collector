@@ -3,4 +3,4 @@
 
 # env-collector
 *.tar
-*.tar.zstd
+*.tar.zst
