@@ -240,7 +240,7 @@ fn env_build_tar(root_path: &Path, files: &[PathBuf]) -> Result<PathBuf, EnvBuil
         path: root_path.to_path_buf(),
         message: format!("Root path has no parent directory: {}", root_path.display()),
     })?;
-    let tar_name = format!("{}_{}.tar", root_name, at);
+    let tar_name = format!("{}_{}.tar.zstd", root_name, at);
     let tar_path = PathBuf::from(tar_name);
     let tar_file = File::create_new(&tar_path).map_err(|err| EnvBuildError {
         path: tar_path.to_path_buf(),
@@ -251,7 +251,15 @@ fn env_build_tar(root_path: &Path, files: &[PathBuf]) -> Result<PathBuf, EnvBuil
         )
         .clone(),
     })?;
-    let mut tar_builder = tar::Builder::new(tar_file);
+    let zstd_encoder = zstd::Encoder::new(tar_file, 0).map_err(|err| EnvBuildError {
+        path: tar_path.to_path_buf(),
+        message: format!(
+            "Failed to create zstd encoder for '{}': {}",
+            tar_path.display(),
+            err
+        ),
+    })?;
+    let mut tar_builder = tar::Builder::new(zstd_encoder);
     for file in files {
         let stored_name = file
             .strip_prefix(prefix)
@@ -271,10 +279,18 @@ fn env_build_tar(root_path: &Path, files: &[PathBuf]) -> Result<PathBuf, EnvBuil
                 message: e.to_string(),
             })?;
     }
-    tar_builder.finish().map_err(|e| EnvBuildError {
+    let zstd_encoder = tar_builder.into_inner().map_err(|e| EnvBuildError {
         path: tar_path.to_path_buf(),
         message: format!(
             "Failed to finish tar archive '{}': {}",
+            tar_path.display(),
+            e
+        ),
+    })?;
+    zstd_encoder.finish().map_err(|e| EnvBuildError {
+        path: tar_path.to_path_buf(),
+        message: format!(
+            "Failed to finish zstd compression '{}': {}",
             tar_path.display(),
             e
         ),
