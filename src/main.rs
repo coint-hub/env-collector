@@ -1,3 +1,5 @@
+use chrono::Local;
+use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::{fs, io};
@@ -105,8 +107,12 @@ fn env_collect(path: PathBuf) -> Result<EnvCollectResult, EnvCollectError> {
         path: e.path.clone(),
         message: e.message,
     })?;
+    let tar_path = env_build_tar(&path, &files).map_err(|e| EnvCollectError {
+        path: e.path,
+        message: e.message,
+    })?;
     Ok(EnvCollectResult {
-        path,
+        path: tar_path,
         count: files.len(),
     })
 }
@@ -213,4 +219,66 @@ fn env_is_dirname_ignored(dirname: &str) -> bool {
     }
 
     false
+}
+
+struct EnvBuildError {
+    path: PathBuf,
+    message: String,
+}
+
+fn env_build_tar(root_path: &Path, files: &[PathBuf]) -> Result<PathBuf, EnvBuildError> {
+    let at = Local::now().format("%Y%m%d-%H%M%S");
+    let root_name = root_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| EnvBuildError {
+            path: root_path.to_path_buf(),
+            message: "Root path has no valid file name".to_string(),
+        })?;
+
+    let prefix = root_path.parent().ok_or_else(|| EnvBuildError {
+        path: root_path.to_path_buf(),
+        message: format!("Root path has no parent directory: {}", root_path.display()),
+    })?;
+    let tar_name = format!("{}_{}.tar", root_name, at);
+    let tar_path = PathBuf::from(tar_name);
+    let tar_file = File::create_new(&tar_path).map_err(|err| EnvBuildError {
+        path: tar_path.to_path_buf(),
+        message: format!(
+            "Failed to create tar file '{}': {}",
+            tar_path.display(),
+            err
+        )
+        .clone(),
+    })?;
+    let mut tar_builder = tar::Builder::new(tar_file);
+    for file in files {
+        let stored_name = file
+            .strip_prefix(prefix)
+            .map_err(|e| EnvBuildError {
+                path: file.to_path_buf(),
+                message: format!("Failed to strip prefix from '{}': {}", file.display(), e),
+            })?
+            .to_str()
+            .ok_or_else(|| EnvBuildError {
+                path: file.to_path_buf(),
+                message: format!("Failed to convert path to string: {}", file.display()),
+            })?;
+        tar_builder
+            .append_path_with_name(file, stored_name)
+            .map_err(|e| EnvBuildError {
+                path: file.to_path_buf(),
+                message: e.to_string(),
+            })?;
+    }
+    tar_builder.finish().map_err(|e| EnvBuildError {
+        path: tar_path.to_path_buf(),
+        message: format!(
+            "Failed to finish tar archive '{}': {}",
+            tar_path.display(),
+            e
+        ),
+    })?;
+
+    Ok(tar_path)
 }

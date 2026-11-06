@@ -1,2 +1,6 @@
 # rust
 /target
+
+# env-collector
+*.tar
+*.tar.zstd
